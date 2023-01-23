@@ -1,0 +1,45 @@
+plugins {
+    id 'java'
+}
+
+group 'ru.leonidm'
+version '1.0-SNAPSHOT'
+
+repositories {
+    mavenCentral()
+}
+
+configurations {
+    extraLibs
+}
+
+dependencies {
+    implementation 'org.jetbrains:annotations:23.1.0'
+
+    extraLibs 'org.jooq:joor:0.9.14'
+    extraLibs 'org.apache.bcel:bcel:6.7.0'
+
+    implementation 'org.apache.logging.log4j:log4j-api:2.19.0'
+    implementation 'org.slf4j:slf4j-api:2.0.6'
+
+    testImplementation 'org.junit.jupiter:junit-jupiter-api:5.8.1'
+    testRuntimeOnly 'org.junit.jupiter:junit-jupiter-engine:5.8.1'
+
+    configurations.implementation.extendsFrom(configurations.extraLibs)
+}
+
+jar {
+    duplicatesStrategy = DuplicatesStrategy.WARN
+
+    from {
+        configurations.extraLibs.collect { it.isDirectory() ? it : zipTree(it) }
+    }
+
+    manifest {
+        attributes['Main-Class'] = "ru.leonidm.simplebeans.SimpleBeans"
+    }
+}
+
+test {
+    useJUnitPlatform()
+}
