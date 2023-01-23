@@ -21,7 +21,7 @@ Beans can be created in two ways:
 
 ```java
 @Component
-public class SomeConnection() {
+public class SomeConnection {
 
     private final SomeBean someBean;
     private final SomeBean someBean2;
