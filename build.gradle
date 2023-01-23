@@ -36,7 +36,7 @@ jar {
     }
 
     manifest {
-        attributes['Main-Class'] = "ru.leonidm.simplebeans.SimpleBeans"
+        attributes['Main-Class'] = ""
     }
 }
 
