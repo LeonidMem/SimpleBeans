@@ -9,4 +9,6 @@ public sealed abstract class AbstractLogger permits Log4JLogger, SLF4JLogger, Sy
 
     public abstract void warn(@NotNull String string, @Nullable Object @NotNull ... args);
 
+    public abstract void debug(@NotNull String string, @Nullable Object @NotNull ... args);
+
 }

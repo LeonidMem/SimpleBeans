@@ -6,6 +6,7 @@ import org.jetbrains.annotations.Nullable;
 final class SystemLogger extends AbstractLogger {
 
     private boolean warnsEnabled = false;
+    private boolean debugEnabled = false;
 
     @Override
     public void info(@NotNull String string, @Nullable Object @NotNull ... args) {
@@ -20,6 +21,15 @@ final class SystemLogger extends AbstractLogger {
             System.err.print("[SimpleBeans] ");
             System.err.printf(string, args);
             System.err.println();
+        }
+    }
+
+    @Override
+    public void debug(@NotNull String string, @Nullable Object @NotNull ... args) {
+        if (debugEnabled) {
+            System.out.print("[SimpleBeans] [DEBUG] ");
+            System.out.printf(string, args);
+            System.out.println();
         }
     }
 }

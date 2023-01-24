@@ -22,4 +22,9 @@ public final class SLF4JLogger extends AbstractLogger {
     public void warn(@NotNull String string, @Nullable Object @NotNull ... args) {
         logger.warn(string, args);
     }
+
+    @Override
+    public void debug(@NotNull String string, @Nullable Object @NotNull ... args) {
+        logger.debug(string, args);
+    }
 }

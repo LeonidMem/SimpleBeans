@@ -167,7 +167,6 @@ public final class BcelClassScanner {
                 cannotCheck(className);
             }
         }
-
         return allInterfacesNames;
     }
 
@@ -220,15 +219,15 @@ public final class BcelClassScanner {
         String className = clazz.getName();
 
         if (deep) {
-            return getWrappedClasses(Unchecked.predicate(javaClass -> {
+            return getWrappedClasses(javaClass -> {
                 return getSuperClassesNamesSafety(javaClass).stream()
                         .anyMatch(className::equals);
-            }));
+            });
         }
 
-        return getWrappedClasses(Unchecked.predicate(javaClass -> {
+        return getWrappedClasses(javaClass -> {
             return className.equals(javaClass.getSuperclassName());
-        }));
+        });
     }
 
     @NotNull
@@ -245,15 +244,15 @@ public final class BcelClassScanner {
         String interfaceName = clazz.getName();
 
         if (deep) {
-            return getWrappedClasses(Unchecked.predicate(javaClass -> {
+            return getWrappedClasses(javaClass -> {
                 return getInterfacesNamesSafety(javaClass).stream()
                         .anyMatch(interfaceName::equals);
-            }));
+            });
         }
 
-        return getWrappedClasses(Unchecked.predicate(javaClass -> {
+        return getWrappedClasses(javaClass -> {
             return Arrays.asList(javaClass.getInterfaceNames()).contains(interfaceName);
-        }));
+        });
     }
 
     @NotNull

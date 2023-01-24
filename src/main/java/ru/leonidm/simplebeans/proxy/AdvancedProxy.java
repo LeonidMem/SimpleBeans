@@ -34,11 +34,13 @@ public final class AdvancedProxy {
         }
 
         if (Modifier.isFinal(objectClass.getModifiers())) {
-            LoggerAdapter.get().warn("Cannot proxy %s because it is final class".formatted(objectClass.getName()));
+            LoggerAdapter.get().debug("Cannot proxy %s because it is final class".formatted(objectClass.getName()));
             return object;
         }
 
         Class<?> proxyClass = PROXIED_CLASSES.computeIfAbsent(objectClass, k -> {
+            LoggerAdapter.get().debug("Creating proxy class for %s", objectClass.getSimpleName());
+
             String newPackageName = "ru.leonidm.simplebeans.proxy.generated." + object.getClass().getName();
             String newClassName = "Proxied" + objectClass.getSimpleName();
 
@@ -136,7 +138,9 @@ public final class AdvancedProxy {
                 e.printStackTrace();
             }
 
-            return Reflect.compile(newPackageName + "." + newClassName, sourceCodeBuilder.toString()).get();
+            Class<?> compiledClass = Reflect.compile(newPackageName + "." + newClassName, sourceCodeBuilder.toString()).get();
+            LoggerAdapter.get().debug("Created proxy class for %s", objectClass.getSimpleName());
+            return compiledClass;
         });
 
         try {
