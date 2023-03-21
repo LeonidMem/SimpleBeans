@@ -1,5 +1,6 @@
 package ru.leonidm.simplebeans.proxy.aspects;
 
+import org.intellij.lang.annotations.Language;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 import ru.leonidm.simplebeans.utils.ExceptionUtils;
@@ -7,20 +8,27 @@ import ru.leonidm.simplebeans.utils.ExceptionUtils;
 import java.lang.reflect.Method;
 import java.lang.reflect.Parameter;
 import java.util.Arrays;
+import java.util.function.Predicate;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 public final class WrappedPointCut {
 
-    public static final Object SAME_RESULT = new Object();
+    @Language("RegExp")
+    public static final String MASK_PATTERN = "^((?:[\\w*]+\\.|)+)([\\w*]+)(\\((((?:[\\w.*]+,\\s*)*[\\w.*]+)|\\*|\\.\\.\\.|)\\)|)$";
+    public static final Pattern COMPILED_MASK_PATTERN = Pattern.compile(MASK_PATTERN);
+
+    private static final Pattern ARGUMENTS_SEPARATOR = Pattern.compile(",\\s*");
 
     private final PointCutHandler pointCutHandler;
-    private final String mask;
+    private final Predicate<Method> methodPredicate;
     private final PointCutType pointCutType;
     private final boolean isVoid;
 
-    private WrappedPointCut(@NotNull PointCutHandler pointCutHandler, @NotNull String mask,
+    private WrappedPointCut(@NotNull PointCutHandler pointCutHandler, @NotNull Predicate<Method> methodPredicate,
                             @NotNull PointCutType pointCutType, boolean isVoid) {
         this.pointCutHandler = pointCutHandler;
-        this.mask = mask;
+        this.methodPredicate = methodPredicate;
         this.pointCutType = pointCutType;
         this.isVoid = isVoid;
     }
@@ -58,22 +66,115 @@ public final class WrappedPointCut {
             } catch (Exception e) {
                 throw ExceptionUtils.wrapToRuntime(e);
             }
-        }, mask, pointCutType, pointCut.getReturnType() == Void.TYPE);
+        }, buildMask(mask), pointCutType, pointCut.getReturnType() == Void.TYPE);
     }
 
-    // TODO: smarter masks
-    public boolean doesFitMask(@NotNull Method method) {
-        for (Class<?> currentClass = method.getDeclaringClass(); currentClass != null; currentClass = currentClass.getSuperclass()) {
-            String className = method.getDeclaringClass().getName() + ".";
-            if (!mask.startsWith(className)) {
-                continue;
-            }
-
-            String methodName = mask.substring(className.length());
-            return method.getName().equals(methodName);
+    @NotNull
+    public static Predicate<Method> buildMask(@NotNull String mask) {
+        Matcher matcher = COMPILED_MASK_PATTERN.matcher(mask);
+        if (!matcher.matches()) {
+            throw new IllegalStateException("Got bad mask '%s'".formatted(mask));
         }
 
-        return false;
+        String rawClassMask = matcher.group(1);
+        if (rawClassMask.endsWith(".")) {
+            rawClassMask = rawClassMask.substring(0, rawClassMask.length() - 1);
+        }
+
+        StringBuilder classMaskBuilder = new StringBuilder(rawClassMask.length());
+        boolean isPreviousStar = false;
+        for (char chr : rawClassMask.toCharArray()) {
+            if (isPreviousStar) {
+                if (chr == '*') {
+                    classMaskBuilder.append(".*");
+                } else {
+                    classMaskBuilder.append("[^\\.]*");
+                }
+
+                isPreviousStar = false;
+            } else if (chr == '*') {
+                isPreviousStar = true;
+            } else if (chr == '.') {
+                classMaskBuilder.append("\\.");
+            } else {
+                classMaskBuilder.append(chr);
+            }
+        }
+
+        String classMask = classMaskBuilder.toString();
+
+        String methodNameMask = matcher.group(2).replace("*", "[^\\.]*");
+        String argumentsMask;
+
+        argumentsMask = switch (matcher.groupCount()) {
+            case 2 -> "*";
+            case 3 -> "";
+            case 5 -> matcher.group(5);
+            default -> {
+                throw new IllegalStateException("Got bad mask '%s'".formatted(mask));
+            }
+        };
+
+        Predicate<Method> argumentsPredicate;
+
+        if (argumentsMask == null || argumentsMask.equals("*") || argumentsMask.equals("...")) {
+            argumentsPredicate = (method) -> true;
+        } else if (argumentsMask.isEmpty()) {
+            argumentsPredicate = (method) -> method.getParameterCount() == 0;
+        } else {
+            String[] arguments = ARGUMENTS_SEPARATOR.split(argumentsMask);
+            Pattern[] compiledArguments = new Pattern[arguments.length];
+            for (int i = 0; i < arguments.length; i++) {
+                compiledArguments[i] = Pattern.compile(
+                        "^" + arguments[i].replace("**", ".+").replace("*", "[^\\.]+") + "$"
+                );
+            }
+
+            argumentsPredicate = (method) -> {
+                if (method.getParameterCount() != compiledArguments.length) {
+                    return false;
+                }
+
+                Class<?>[] parameters = method.getParameterTypes();
+                for (int i = 0; i < parameters.length; i++) {
+                    if (!compiledArguments[i].matcher(parameters[i].getName()).matches()) {
+                        return false;
+                    }
+                }
+
+                return true;
+            };
+        }
+
+        Predicate<Method> classPredicate;
+
+        if (classMask.isEmpty() || classMask.equals(".+")) {
+            classPredicate = (method) -> true;
+        } else {
+            Pattern compiledClass = Pattern.compile("^" + classMask + "$");
+            classPredicate = (method) -> {
+                return compiledClass.matcher(method.getDeclaringClass().getName()).matches();
+            };
+        }
+
+        Predicate<Method> methodNamePredicate;
+
+        if (methodNameMask.equals("[^\\.]+")) {
+            methodNamePredicate = (method) -> true;
+        } else {
+            Pattern compiledMethodName = Pattern.compile("^" + methodNameMask + "$");
+            methodNamePredicate = (method) -> {
+                return compiledMethodName.matcher(method.getName()).matches();
+            };
+        }
+
+        return (method) -> {
+            return methodNamePredicate.test(method) && classPredicate.test(method) && argumentsPredicate.test(method);
+        };
+    }
+
+    public boolean doesFitMask(@NotNull Method method) {
+        return methodPredicate.test(method);
     }
 
     @NotNull

@@ -2,10 +2,18 @@ package ru.leonidm.simplebeans.applications;
 
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Unmodifiable;
-import ru.leonidm.simplebeans.beans.*;
+import ru.leonidm.simplebeans.beans.Autowired;
+import ru.leonidm.simplebeans.beans.Bean;
+import ru.leonidm.simplebeans.beans.BeanInitializer;
+import ru.leonidm.simplebeans.beans.Component;
+import ru.leonidm.simplebeans.beans.Configuration;
 import ru.leonidm.simplebeans.proxy.AspectInvocationHandler;
 import ru.leonidm.simplebeans.proxy.ProxyClass;
-import ru.leonidm.simplebeans.proxy.aspects.*;
+import ru.leonidm.simplebeans.proxy.aspects.After;
+import ru.leonidm.simplebeans.proxy.aspects.Aspect;
+import ru.leonidm.simplebeans.proxy.aspects.Before;
+import ru.leonidm.simplebeans.proxy.aspects.PointCutType;
+import ru.leonidm.simplebeans.proxy.aspects.WrappedPointCut;
 import ru.leonidm.simplebeans.utils.BcelClassScanner;
 import ru.leonidm.simplebeans.utils.ExceptionUtils;
 import ru.leonidm.simplebeans.utils.GeneralUtils;
@@ -16,7 +24,18 @@ import java.lang.reflect.Constructor;
 import java.lang.reflect.Field;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collection;
+import java.util.Collections;
+import java.util.EnumMap;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.LinkedList;
+import java.util.List;
+import java.util.Map;
+import java.util.Optional;
+import java.util.Set;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
@@ -37,13 +56,16 @@ public final class ApplicationContext {
             throw new IllegalStateException("Class %s implements ProxyClass that is forbidden".formatted(optionalProxyClass.get()));
         }
 
-        bcelClassScanner.getTypesAnnotatedWith(RegisterAsBean.class).forEach(annotationClass -> {
+        bcelClassScanner.getTypesAnnotatedWith(Component.class).forEach(annotationClass -> {
             if (!annotationClass.isAnnotation()) {
-                throw new IllegalStateException("Found @RegisterAsBean on %s, but this annotation can annotate only other annotations"
-                        .formatted(annotationClass.getName()));
+                return;
             }
 
             bcelClassScanner.getTypesAnnotatedWith(annotationClass.asSubclass(Annotation.class)).forEach(beanClass -> {
+                if (annotationClass == Component.class && beanClass.isAnnotation()) {
+                    return;
+                }
+
                 if (!beanClassToInstance.containsKey(Pair.of(beanClass, ""))) {
                     try {
                         Constructor<?>[] constructors = beanClass.getDeclaredConstructors();
@@ -72,6 +94,7 @@ public final class ApplicationContext {
                     .forEach(this::initializeIfCan);
         });
 
+        // TODO: build normal dependency tree
         int previousSize = -1;
         while (previousSize != waitingInitializers.size() && !waitingInitializers.isEmpty()) {
             previousSize = waitingInitializers.size();
@@ -173,6 +196,12 @@ public final class ApplicationContext {
         }
 
         return bean;
+    }
+
+    @NotNull
+    @Unmodifiable
+    public Collection<Object> getBeans() {
+        return Collections.unmodifiableCollection(beanClassToInstance.values());
     }
 
     private <A extends Annotation> void registerPointCut(@NotNull Method pointCut, @NotNull Class<A> annotationClass,

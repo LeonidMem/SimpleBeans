@@ -28,57 +28,55 @@ import java.util.stream.Collectors;
 public final class BcelClassScanner {
 
     private static final Set<String> PRINTED_ABOUT = new HashSet<>();
-    private static final Map<File, BcelClassScanner> APPLICATION_TO_SCANNER = new HashMap<>();
+    private static final Map<Set<File>, BcelClassScanner> APPLICATION_TO_SCANNER = new HashMap<>();
 
     private final Repository repository;
     private final Set<String> classNames;
     private final ClassLoader classLoader;
 
-    public BcelClassScanner(@NotNull ClassLoader mainClassLoader, @NotNull File mainFile,
-                            @NotNull File @NotNull [] libraries) {
-        File[] allFiles = new File[1 + libraries.length];
-        System.arraycopy(libraries, 0, allFiles, 1, libraries.length);
-        allFiles[0] = mainFile;
-
-        String fullPath = String.join(File.pathSeparator, Arrays.stream(allFiles)
+    public BcelClassScanner(@NotNull ClassLoader mainClassLoader, @NotNull Collection<File> files, @NotNull Collection<File> scanFiles) {
+        String fullPath = files.stream()
                 .map(File::getPath)
-                .collect(Collectors.toList()));
+                .collect(Collectors.joining(File.pathSeparator));
 
         Set<String> modifiableClassNames = new HashSet<>();
 
+        JarFile currentJarFile = null;
         try (ClassPath classPath = new ClassPath(SyntheticRepository.getInstance().getClassPath(), fullPath)) {
             repository = SyntheticRepository.getInstance(classPath);
 
-            boolean firstIteration = true;
+            for (File file : files) {
 
-            for (File file : allFiles) {
-                try (JarFile jarFile = new JarFile(file)) {
-                    Enumeration<JarEntry> entries = jarFile.entries();
-                    while (entries.hasMoreElements()) {
-                        JarEntry jarEntry = entries.nextElement();
+                Iterator<String> classIterator;
+                if (file.isDirectory()) {
+                    classIterator = new DirClassIterator(file);
+                } else {
+                    currentJarFile = new JarFile(file);
+                    classIterator = new JarClassIterator(currentJarFile);
+                }
 
-                        if (!isClassEntry(jarEntry)) {
-                            continue;
-                        }
-
-                        String name = jarEntry.getName().substring(0, jarEntry.getName().lastIndexOf(".")).replace("/", ".");
-                        try {
-                            repository.loadClass(name);
-                            if (firstIteration) {
-                                modifiableClassNames.add(name);
-                            }
-                        } catch (ClassNotFoundException e) {
-                            throw new IllegalStateException(e);
-                        }
+                while (classIterator.hasNext()) {
+                    String className = classIterator.next();
+                    repository.loadClass(className);
+                    if (scanFiles.contains(file)) {
+                        modifiableClassNames.add(className);
                     }
+                }
 
-                    firstIteration = false;
-                } catch (IOException e) {
-                    throw new IllegalArgumentException("Got non-jar file %s".formatted(file));
+                if (currentJarFile != null) {
+                    currentJarFile.close();
                 }
             }
-        } catch (IOException e) {
+        } catch (IOException | ClassNotFoundException e) {
             throw new IllegalStateException(e);
+        } finally {
+            try {
+                if (currentJarFile != null) {
+                    currentJarFile.close();
+                }
+            } catch (IOException e) {
+                e.printStackTrace();
+            }
         }
 
         classNames = Collections.unmodifiableSet(modifiableClassNames);
@@ -87,18 +85,15 @@ public final class BcelClassScanner {
 
     @NotNull
     public static BcelClassScanner of(@NotNull File file) {
-        return APPLICATION_TO_SCANNER.computeIfAbsent(file, k -> {
-            return new BcelClassScanner(SimpleBeans.class.getClassLoader(), file, new File[0]);
-        });
+        Set<File> files = Collections.singleton(file);
+        return BcelClassScanner.of(files, files);
     }
 
-    private static boolean isClassEntry(@NotNull JarEntry jarEntry) {
-        if (jarEntry.isDirectory()) {
-            return false;
-        }
-
-        String entryName = jarEntry.getName();
-        return entryName.endsWith(".class") && !entryName.endsWith("module-info.class");
+    @NotNull
+    public static BcelClassScanner of(@NotNull Collection<File> files, @NotNull Collection<File> scanFiles) {
+        return APPLICATION_TO_SCANNER.computeIfAbsent(Set.copyOf(files), k -> {
+            return new BcelClassScanner(SimpleBeans.class.getClassLoader(), files, scanFiles);
+        });
     }
 
     @NotNull
@@ -483,6 +478,95 @@ public final class BcelClassScanner {
         @NotNull
         public Field getField() {
             return field;
+        }
+    }
+
+    private static String normalizeClassName(@NotNull String path) {
+        return path.substring(0, path.lastIndexOf(".")).replace('/', '.').replace('\\', '.');
+    }
+
+    private static final class JarClassIterator implements Iterator<String> {
+
+        private final Enumeration<JarEntry> entries;
+        private String nextElement;
+
+        public JarClassIterator(@NotNull JarFile jarFile) {
+            this.entries = jarFile.entries();
+            nextElement = next();
+        }
+
+        @Override
+        public boolean hasNext() {
+            return nextElement != null;
+        }
+
+        @Override
+        public String next() {
+            String outElement = nextElement;
+
+            nextElement = null;
+            while (entries.hasMoreElements() && nextElement == null) {
+                JarEntry jarEntry = entries.nextElement();
+                if (isClassEntry(jarEntry)) {
+                    nextElement = jarEntry.getName().substring(0, jarEntry.getName().lastIndexOf(".")).replace("/", ".");
+                    break;
+                }
+            }
+
+            return outElement;
+        }
+
+        private static boolean isClassEntry(@NotNull JarEntry jarEntry) {
+            if (jarEntry.isDirectory()) {
+                return false;
+            }
+
+            String entryName = jarEntry.getName();
+            return entryName.endsWith(".class") && !entryName.endsWith("module-info.class");
+        }
+    }
+
+    private static final class DirClassIterator implements Iterator<String> {
+
+        private final LinkedList<File> directories = new LinkedList<>();
+        private final LinkedList<File> classFiles = new LinkedList<>();
+        private final int pathPrefixLength;
+
+        public DirClassIterator(@NotNull File root) {
+            directories.add(root);
+            pathPrefixLength = root.getAbsolutePath().length() + 1;
+        }
+
+        @Override
+        public boolean hasNext() {
+            return !directories.isEmpty() || !classFiles.isEmpty();
+        }
+
+        @Override
+        public String next() {
+            while (classFiles.isEmpty()) {
+                File directory = directories.pop();
+                File[] files = directory.listFiles(file -> {
+                    if (file.isDirectory()) {
+                        return true;
+                    }
+
+                    String fileName = file.getName();
+                    return fileName.endsWith(".class") && !fileName.equals("module-info.class");
+                });
+
+                for (File file : Objects.requireNonNull(files)) {
+                    if (file.isDirectory()) {
+                        directories.add(file);
+                    } else {
+                        classFiles.add(file);
+                    }
+                }
+            }
+
+            File file = classFiles.pop();
+
+            return normalizeClassName(file.getAbsolutePath().substring(pathPrefixLength));
         }
     }
 }

@@ -1,5 +1,7 @@
 package ru.leonidm.simplebeans.proxy.aspects;
 
+import org.intellij.lang.annotations.Pattern;
+
 import java.lang.annotation.ElementType;
 import java.lang.annotation.Retention;
 import java.lang.annotation.RetentionPolicy;
@@ -9,6 +11,7 @@ import java.lang.annotation.Target;
 @Retention(RetentionPolicy.RUNTIME)
 public @interface After {
 
+    @Pattern(WrappedPointCut.MASK_PATTERN)
     String value();
 
 }

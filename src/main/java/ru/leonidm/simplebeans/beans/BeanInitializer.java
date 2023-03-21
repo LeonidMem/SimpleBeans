@@ -10,7 +10,8 @@ import java.lang.reflect.Executable;
 import java.lang.reflect.Method;
 import java.util.Arrays;
 
-public sealed abstract class BeanInitializer<E extends Executable> permits BeanInitializer.BeanMethod, BeanInitializer.BeanConstructor {
+public sealed abstract class BeanInitializer<E extends Executable> permits BeanInitializer.BeanMethod,
+                                                                           BeanInitializer.BeanConstructor {
 
     protected final E executable;
     protected final Class<?> beanClass;
@@ -38,7 +39,7 @@ public sealed abstract class BeanInitializer<E extends Executable> permits BeanI
     }
 
     public boolean canCreate() {
-        return Arrays.stream(executable.getParameterTypes()).allMatch(context::hasBean);
+        return executable.getParameterCount() == 0 || Arrays.stream(executable.getParameterTypes()).allMatch(context::hasBean);
     }
 
     @NotNull

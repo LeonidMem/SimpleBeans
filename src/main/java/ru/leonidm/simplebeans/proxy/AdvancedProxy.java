@@ -1,26 +1,37 @@
 package ru.leonidm.simplebeans.proxy;
 
+import net.bytebuddy.ByteBuddy;
+import net.bytebuddy.dynamic.DynamicType;
+import net.bytebuddy.implementation.MethodDelegation;
+import net.bytebuddy.implementation.bind.annotation.AllArguments;
+import net.bytebuddy.implementation.bind.annotation.Origin;
+import net.bytebuddy.implementation.bind.annotation.RuntimeType;
+import net.bytebuddy.implementation.bind.annotation.This;
+import net.bytebuddy.matcher.ElementMatchers;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
-import org.joor.Reflect;
-import ru.leonidm.simplebeans.SimpleBeans;
 import ru.leonidm.simplebeans.applications.ApplicationContext;
 import ru.leonidm.simplebeans.beans.Bean;
 import ru.leonidm.simplebeans.logger.LoggerAdapter;
+import ru.leonidm.simplebeans.proxy.aspects.Aspect;
 import ru.leonidm.simplebeans.utils.ExceptionUtils;
 
 import java.io.IOException;
-import java.lang.reflect.*;
-import java.nio.file.Files;
-import java.nio.file.Path;
-import java.util.*;
-import java.util.stream.Collectors;
+import java.lang.reflect.Constructor;
+import java.lang.reflect.Field;
+import java.lang.reflect.Method;
+import java.lang.reflect.Modifier;
+import java.lang.reflect.Proxy;
+import java.util.Arrays;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
 
 public final class AdvancedProxy {
 
     private static final Map<Class<?>, Class<?>> PROXIED_CLASSES = new HashMap<>();
-    private static final Map<Class<?>, Method[]> REAL_METHOD_INDEXES = new HashMap<>();
-
 
     private AdvancedProxy() {
 
@@ -29,122 +40,79 @@ public final class AdvancedProxy {
     @NotNull
     private static <T> T newProxyInstance(@NotNull T object, @NotNull Class<?> objectClass, @NotNull ApplicationContext context) {
         if (objectClass.isInterface()) {
-            Object proxy = Proxy.newProxyInstance(SimpleBeans.class.getClassLoader(), new Class[]{objectClass}, new AspectInvocationHandler(context, object));
+            Object proxy = Proxy.newProxyInstance(objectClass.getClassLoader(), new Class[]{objectClass}, new AspectInvocationHandler(context, object));
             return (T) proxy;
         }
 
-        if (Modifier.isFinal(objectClass.getModifiers())) {
-            LoggerAdapter.get().debug("Cannot proxy %s because it is final class".formatted(objectClass.getName()));
-            return object;
-        }
-
         Class<?> proxyClass = PROXIED_CLASSES.computeIfAbsent(objectClass, k -> {
-            LoggerAdapter.get().debug("Creating proxy class for %s", objectClass.getSimpleName());
+            if (objectClass.isAnnotationPresent(Aspect.class)) {
+                return objectClass;
+            }
 
-            String newPackageName = "ru.leonidm.simplebeans.proxy.generated." + object.getClass().getName();
-            String newClassName = "Proxied" + objectClass.getSimpleName();
+            if (Modifier.isFinal(objectClass.getModifiers())) {
+                LoggerAdapter.get().debug("Cannot proxy {} because it is final class", objectClass.getName());
+                return objectClass;
+            }
 
             Constructor<?>[] constructors = objectClass.getDeclaredConstructors();
             if (constructors.length != 1) {
-                throw new IllegalStateException("Class %s must have one and only one constructor to be proxied".formatted(objectClass.getName()));
+                LoggerAdapter.get().debug("Cannot proxy {} because it has more than one constructor", objectClass.getName());
+                return objectClass;
             }
 
             Constructor<?> constructor = constructors[0];
             int constructorModifiers = constructor.getModifiers();
             if (!Modifier.isPublic(constructorModifiers) && !Modifier.isProtected(constructorModifiers)) {
-                throw new IllegalStateException("Class %s must have public or protected constructor to be proxied".formatted(objectClass.getName()));
+                LoggerAdapter.get().debug("Cannot proxy {} because it has non-public and non-protected constructor", objectClass.getName());
+                return objectClass;
             }
 
-            StringBuilder sourceCodeBuilder = new StringBuilder();
-            sourceCodeBuilder.append("package ").append(newPackageName).append(";\n\n");
-            sourceCodeBuilder.append("public class ").append(newClassName).append(" extends ").append(objectClass.getName())
-                    .append(" implements ru.leonidm.simplebeans.proxy.ProxyClass {\n\n");
-            sourceCodeBuilder.append("    private final ru.leonidm.simplebeans.proxy.AspectInvocationHandler invocationHandler;\n\n");
+            LoggerAdapter.get().debug("Creating proxy class for {}", objectClass.getSimpleName());
 
-            sourceCodeBuilder.append("    public ").append(newClassName).append("(ru.leonidm.simplebeans.proxy.AspectInvocationHandler invocationHandler");
-            for (Parameter parameter : constructor.getParameters()) {
-                sourceCodeBuilder.append(", ").append(parameter.getType().getTypeName()).append(" ").append(parameter.getName());
-            }
-
-            String constructorsArgsNames = Arrays.stream(constructor.getParameters())
-                    .map(Parameter::getName)
-                    .collect(Collectors.joining(", "));
-
-            sourceCodeBuilder.append(") {\n");
-            sourceCodeBuilder.append("        super(" + constructorsArgsNames + ");\n");
-            sourceCodeBuilder.append("        this.invocationHandler = invocationHandler;\n");
-            sourceCodeBuilder.append("    }\n\n");
+            DynamicType.Builder<?> builder = new ByteBuddy()
+                    .subclass(objectClass)
+                    .implement(ProxyClass.class)
+                    .defineField("invocationHandler", AspectInvocationHandler.class, Modifier.PRIVATE)
+                    .annotateType(objectClass.getAnnotations());
 
             Set<Method> methodsSet = new HashSet<>(List.of(objectClass.getDeclaredMethods()));
             methodsSet.addAll(List.of(objectClass.getMethods()));
 
-            Method[] methods = methodsSet.toArray(Method[]::new);
-            REAL_METHOD_INDEXES.put(objectClass, methods);
-            for (int index = 0; index < methods.length; index++) {
-                Method method = methods[index];
-
+            for (Method method : methodsSet) {
                 int modifiers = method.getModifiers();
                 if (Modifier.isFinal(modifiers)) {
                     if (method.getDeclaringClass() != Object.class) {
-                        LoggerAdapter.get().warn("Cannot proxy %s because it is final method".formatted(method));
+                        LoggerAdapter.get().debug("Cannot proxy {} because it is final method", method);
                     }
                     continue;
                 }
 
                 if (Modifier.isPrivate(modifiers)) {
-                    LoggerAdapter.get().warn("Cannot proxy %s because it is private method".formatted(method));
+                    LoggerAdapter.get().debug("Cannot proxy {} because it is private method", method);
                     continue;
                 }
 
-                String accessKey;
-                if (Modifier.isPublic(modifiers)) {
-                    accessKey = "public ";
-                } else if (Modifier.isProtected(modifiers)) {
-                    accessKey = "protected ";
-                } else {
-                    accessKey = "";
-                }
-
-                sourceCodeBuilder.append("    ").append(accessKey).append(method.getReturnType().getTypeName()).append(" ").append(method.getName()).append("(");
-
-                String params = Arrays.stream(method.getParameters()).map(parameter -> parameter.getType().getTypeName() + " " + parameter.getName())
-                        .collect(Collectors.joining(", "));
-                sourceCodeBuilder.append(params).append(") {\n");
-
-                sourceCodeBuilder.append("        ");
-
-                if (method.getReturnType() != Void.TYPE) {
-                    sourceCodeBuilder.append("return (").append(method.getReturnType().getTypeName()).append(") ");
-                }
-
-                sourceCodeBuilder.append("ru.leonidm.simplebeans.proxy.AdvancedProxy.onMethodCall(this, ").append(index).append(", ");
-
-                if (method.getParameterCount() == 0) {
-                    sourceCodeBuilder.append("null");
-                } else {
-                    String args = Arrays.stream(method.getParameters()).map(Parameter::getName).collect(Collectors.joining(", "));
-                    sourceCodeBuilder.append("new Object[]{").append(args).append("}");
-                }
-                sourceCodeBuilder.append(");\n");
-
-                sourceCodeBuilder.append("    }\n\n");
+                builder = builder.method(ElementMatchers.is(method))
+                        .intercept(MethodDelegation.to(AspectInterceptor.INSTANCE))
+                        .annotateMethod(method.getAnnotations());
             }
 
-            sourceCodeBuilder.append("}\n");
-
-            try {
-                Files.writeString(Path.of(objectClass.getSimpleName() + ".java"), sourceCodeBuilder);
+            try (DynamicType.Unloaded<?> unloaded = builder.make()) {
+                Class<?> loadedClass = unloaded.load(objectClass.getClassLoader()).getLoaded();
+                LoggerAdapter.get().debug("Created proxy class for {}", objectClass.getSimpleName());
+                return loadedClass;
             } catch (IOException e) {
-                e.printStackTrace();
+                throw new IllegalStateException(e);
             }
-
-            Class<?> compiledClass = Reflect.compile(newPackageName + "." + newClassName, sourceCodeBuilder.toString()).get();
-            LoggerAdapter.get().debug("Created proxy class for %s", objectClass.getSimpleName());
-            return compiledClass;
         });
+
+        if (proxyClass == objectClass) {
+            return object;
+        }
 
         try {
             Constructor<?> constructor = proxyClass.getConstructors()[0];
+            // TODO: cache args
             Object[] args = Arrays.stream(constructor.getParameters()).map(parameter -> {
                 if (parameter.getType() == AspectInvocationHandler.class) {
                     return null;
@@ -158,16 +126,19 @@ public final class AdvancedProxy {
                 return context.getBean(parameter.getType());
             }).toArray();
 
-            args[0] = new AspectInvocationHandler(context, object);
+            T t = (T) constructor.newInstance(args);
+            Field field = t.getClass().getDeclaredField("invocationHandler");
+            field.setAccessible(true);
+            field.set(t, new AspectInvocationHandler(context, object));
 
-            return (T) constructor.newInstance(args);
+            return t;
         } catch (Exception e) {
             throw ExceptionUtils.wrapToRuntime(e);
         }
     }
 
     @NotNull
-    public static <T> T proxyIfNeeded(T object, @NotNull Class<?> objectClass, @NotNull ApplicationContext context) {
+    public static <T> T proxyIfNeeded(@NotNull T object, @NotNull Class<?> objectClass, @NotNull ApplicationContext context) {
         if (ProxyClass.class.isAssignableFrom(object.getClass())) {
             return object;
         }
@@ -175,25 +146,35 @@ public final class AdvancedProxy {
         return newProxyInstance(object, objectClass, context);
     }
 
-    @Nullable
-    public static Object onMethodCall(@NotNull Object proxyObject, int methodIndex, @Nullable Object @Nullable [] args) {
-        try {
-            Class<?> proxyClass = proxyObject.getClass();
-            Class<?> realClass = proxyClass.getSuperclass();
-            Method method = REAL_METHOD_INDEXES.get(realClass)[methodIndex];
+    public static class AspectInterceptor {
 
-            Field field = proxyClass.getDeclaredField("invocationHandler");
-            field.setAccessible(true);
-            AspectInvocationHandler invocationHandler = (AspectInvocationHandler) field.get(proxyObject);
+        public static final AspectInterceptor INSTANCE = new AspectInterceptor();
 
-            Object result = invocationHandler.invoke(proxyObject, method, args);
-            if (result != null) {
-                return proxyIfNeeded(result, method.getReturnType(), invocationHandler.getContext());
+        private AspectInterceptor() {
+
+        }
+
+        @RuntimeType
+        @Nullable
+        public Object onMethodCall(@This @NotNull Object proxyObject,
+                                   @Origin @NotNull Method method,
+                                   @AllArguments @Nullable Object @NotNull [] args) {
+            try {
+                Class<?> proxyClass = proxyObject.getClass();
+
+                Field field = proxyClass.getDeclaredField("invocationHandler");
+                field.setAccessible(true);
+                AspectInvocationHandler invocationHandler = (AspectInvocationHandler) field.get(proxyObject);
+
+                Object result = invocationHandler.invoke(proxyObject, method, args);
+                if (result != null) {
+                    return proxyIfNeeded(result, method.getReturnType(), invocationHandler.getContext());
+                }
+
+                return null;
+            } catch (Throwable e) {
+                throw ExceptionUtils.wrapToRuntime(e);
             }
-
-            return null;
-        } catch (Throwable e) {
-            throw ExceptionUtils.wrapToRuntime(e);
         }
     }
 }

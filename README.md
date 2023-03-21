@@ -71,12 +71,12 @@ All beans and return values of their methods are proxied *(even the objects)*, s
 @Aspect
 public class ConnectionAspect {
 
-    @Before("java.sql.Connection.executeUpdate")
+    @Before("java.sql.Connection.execute**")
     public void aspect(Method method, Object[] args) {
         args[0] = ((String) args[0]).repeat(2);
     }
 
-    @After("java.sql.Statement.executeUpdate")
+    @After("java.sql.Statement.execute**")
     public int aspect(Object result) {
         return ((Integer) result) * 4;
     }
@@ -90,8 +90,43 @@ In aspect there are several types of arguments can be used:
 * `Object` — result *(can be used only in `@After` point cut)*
 * `Object[]` — arguments *(if they are changed in `@Before`)*, then they will be changed before method call
 
-Masks are really simple now, because they work only with exactly class and method.
+### More about pointcuts' masks
+Masks are divided in three parts:
+* Class
+* Method
+* Arguments
+
+So, mask `ru.leonidm.foo.Bar(java.lang.String)` will be divided to:
+* Class `ru.leonidm.foo`
+* Method `Bar`
+* Arguments `java.lang.String`
+
+---
+
+Also, there are some wildcards:
+* For classes and classes of arguments:
+  * `**` — any amount of packages _(even zero)_
+  * `*` — any amount of symbols except dots _(even zero)_
+* For methods:
+  * `*` — any amount of symbols except dots _(even zero)_
+* For full section of arguments:
+  * `(*)` or `(...)` — any amount of arguments
+
+
+### Example of masks:
+* `**.*(*)` — any class, any method, any amount of arguments
+* `**.*` — any class, any method, any amount of arguments
+* `**.*()` — any class, any method, zero arguments
+* `**.*(java.lang.String, java.util.List)` — any class, any method, one `String` and one `List` arguments
+* `**.*(**String*)` — any class, any method, one argument with class with name `/any amount of packages/.String/any symbols except dot/`
+* `net.**.foo.*(java.lang.String)` — any class with name `net./any amount of packages/.foo`, any method, one `String` argument
+* `net.**bar.foo.*(java.lang.String)` — any class with name `net./any amount of packages, but last ends with 'bar'/.foo`, any method, one `String` argument
+* `net.*.foo.*(java.lang.String)` — any class with name `net./one any package/.foo`, any method, one `String` argument
+* `net.*bar.foo.*(java.lang.String)` — any class with name `net./one any package, but ends with bar/.foo`, any method, one `String` argument
+* `net.foo.bar.get*` — class with name `net.foo.bar`, any method with name `get/any symbols/`, any amount of arguments
 
 # TODO list:
-* Smarter masks
+* Improve aspect arguments resolving
+* Removed need for `java.lang` in pointcuts' masks
 * Add ability to run code in IntelliJ IDEA without compiling
+* Tests

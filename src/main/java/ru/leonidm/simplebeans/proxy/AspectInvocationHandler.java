@@ -30,7 +30,9 @@ public final class AspectInvocationHandler implements InvocationHandler {
 
     @Override
     public Object invoke(Object proxy, Method method, Object[] args) throws Throwable {
-        context.getPointCuts(method, PointCutType.BEFORE).forEach(wrappedPointCut -> wrappedPointCut.run(method, args, null));
+        for (WrappedPointCut wrappedPointCut : context.getPointCuts(method, PointCutType.BEFORE)) {
+            wrappedPointCut.run(method, args, null);
+        }
         Object result = method.invoke(realObject, args);
         for (WrappedPointCut wrappedPointCut : context.getPointCuts(method, PointCutType.AFTER)) {
             Object pointCutResult = wrappedPointCut.run(method, args, result);
