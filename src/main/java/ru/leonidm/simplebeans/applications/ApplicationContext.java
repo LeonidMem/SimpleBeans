@@ -2,9 +2,12 @@ package ru.leonidm.simplebeans.applications;
 
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Unmodifiable;
+import org.jetbrains.annotations.UnmodifiableView;
 import ru.leonidm.simplebeans.beans.Autowired;
 import ru.leonidm.simplebeans.beans.Bean;
+import ru.leonidm.simplebeans.beans.BeanData;
 import ru.leonidm.simplebeans.beans.BeanInitializer;
+import ru.leonidm.simplebeans.beans.BeansDependencyTree;
 import ru.leonidm.simplebeans.beans.Component;
 import ru.leonidm.simplebeans.beans.Configuration;
 import ru.leonidm.simplebeans.proxy.AspectInvocationHandler;
@@ -17,8 +20,8 @@ import ru.leonidm.simplebeans.proxy.aspects.WrappedPointCut;
 import ru.leonidm.simplebeans.utils.BcelClassScanner;
 import ru.leonidm.simplebeans.utils.ExceptionUtils;
 import ru.leonidm.simplebeans.utils.GeneralUtils;
-import ru.leonidm.simplebeans.utils.Pair;
 
+import java.io.File;
 import java.lang.annotation.Annotation;
 import java.lang.reflect.Constructor;
 import java.lang.reflect.Field;
@@ -31,7 +34,6 @@ import java.util.Collections;
 import java.util.EnumMap;
 import java.util.HashMap;
 import java.util.HashSet;
-import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -41,13 +43,13 @@ import java.util.stream.Collectors;
 
 public final class ApplicationContext {
 
-    private final Map<Pair<Class<?>, String>, Object> beanClassToInstance = new HashMap<>();
-    private final LinkedList<BeanInitializer<?>> waitingInitializers = new LinkedList<>();
+    private final Map<BeanData, Object> beanClassToInstance = new HashMap<>();
     private final Set<WrappedPointCut> pointCuts = new HashSet<>();
     private final Map<Method, EnumMap<PointCutType, List<WrappedPointCut>>> pointCutsCache = new HashMap<>();
 
     public ApplicationContext(@NotNull Class<?> applicationClass) {
-        BcelClassScanner bcelClassScanner = BcelClassScanner.of(GeneralUtils.getDeclaringJarFile(applicationClass));
+        Set<File> classPath = GeneralUtils.getClassPathFiles();
+        BcelClassScanner bcelClassScanner = BcelClassScanner.of(classPath, classPath);
 
         List<Class<?>> beansClasses = new ArrayList<>();
 
@@ -55,6 +57,8 @@ public final class ApplicationContext {
         if (optionalProxyClass.isPresent()) {
             throw new IllegalStateException("Class %s implements ProxyClass that is forbidden".formatted(optionalProxyClass.get()));
         }
+
+        BeansDependencyTree dependencyTree = new BeansDependencyTree(this);
 
         bcelClassScanner.getTypesAnnotatedWith(Component.class).forEach(annotationClass -> {
             if (!annotationClass.isAnnotation()) {
@@ -66,15 +70,15 @@ public final class ApplicationContext {
                     return;
                 }
 
-                if (!beanClassToInstance.containsKey(Pair.of(beanClass, ""))) {
+                if (!beanClassToInstance.containsKey(new BeanData(beanClass, ""))) {
                     try {
                         Constructor<?>[] constructors = beanClass.getDeclaredConstructors();
                         if (constructors.length != 1) {
-                            throw new IllegalStateException("Bean %s must have one and only one constructor".formatted(beanClass.getName()));
+                            throw new IllegalStateException("Bean %s must have only one constructor".formatted(beanClass.getName()));
                         }
 
                         BeanInitializer<?> beanInitializer = BeanInitializer.of(constructors[0], this);
-                        initializeIfCan(beanInitializer);
+                        dependencyTree.add(beanInitializer);
                         beansClasses.add(beanClass);
                     } catch (Exception e) {
                         throw ExceptionUtils.wrapToRuntime(e);
@@ -91,27 +95,10 @@ public final class ApplicationContext {
                         beansClasses.add(method.getReturnType());
                         return BeanInitializer.of(method, method.getAnnotation(Bean.class).id(), this);
                     })
-                    .forEach(this::initializeIfCan);
+                    .forEach(dependencyTree::add);
         });
 
-        // TODO: build normal dependency tree
-        int previousSize = -1;
-        while (previousSize != waitingInitializers.size() && !waitingInitializers.isEmpty()) {
-            previousSize = waitingInitializers.size();
-
-            waitingInitializers.removeIf(initializer -> {
-                if (initializer.canCreate()) {
-                    beanClassToInstance.put(toKeyPair(initializer), initializer.create());
-                    return true;
-                }
-
-                return false;
-            });
-        }
-
-        if (!waitingInitializers.isEmpty()) {
-            throw new IllegalStateException("Cannot load beans %s".formatted(waitingInitializers));
-        }
+        dependencyTree.initializeBeans();
 
         beansClasses.stream().map(Class::getDeclaredFields)
                 .flatMap(Arrays::stream)
@@ -122,7 +109,14 @@ public final class ApplicationContext {
                     Autowired autowired = field.getAnnotation(Autowired.class);
 
                     Object declaredBean = getNonProxiedBean(field.getDeclaringClass());
-                    Object autowiredBean = getBean(field.getType(), autowired.id());
+
+                    Object autowiredBean;
+                    try {
+                        autowiredBean = getBean(field.getType(), autowired.id());
+                    } catch (IllegalArgumentException e) {
+                        throw new IllegalStateException("%s depends on %s that is not reachable"
+                                .formatted(new BeanData(field.getDeclaringClass(), ""), new BeanData(field.getType(), autowired.id())));
+                    }
 
                     try {
                         field.set(declaredBean, autowiredBean);
@@ -144,11 +138,14 @@ public final class ApplicationContext {
                     Object[] args = Arrays.stream(method.getParameters())
                             .map(parameter -> {
                                 Bean bean = parameter.getAnnotation(Bean.class);
-                                if (bean != null) {
-                                    return getBean(parameter.getType(), bean.id());
-                                }
+                                String id = bean != null ? bean.id() : autowired.id();
 
-                                return getBean(parameter.getType(), autowired.id());
+                                try {
+                                    return getBean(parameter.getType(), id);
+                                } catch (IllegalArgumentException e) {
+                                    throw new IllegalStateException("%s depends on %s that is not reachable"
+                                            .formatted(new BeanData(method.getDeclaringClass(), ""), new BeanData(parameter.getType(), id)));
+                                }
                             })
                             .toArray();
 
@@ -172,14 +169,6 @@ public final class ApplicationContext {
         });
     }
 
-    private void initializeIfCan(@NotNull BeanInitializer<?> beanInitializer) {
-        if (!beanInitializer.canCreate()) {
-            waitingInitializers.add(beanInitializer);
-        } else {
-            beanClassToInstance.put(toKeyPair(beanInitializer), beanInitializer.create());
-        }
-    }
-
     @NotNull
     private Object getNonProxiedBean(@NotNull Class<?> beanClass) {
         Object bean = getBean(beanClass);
@@ -199,7 +188,7 @@ public final class ApplicationContext {
     }
 
     @NotNull
-    @Unmodifiable
+    @UnmodifiableView
     public Collection<Object> getBeans() {
         return Collections.unmodifiableCollection(beanClassToInstance.values());
     }
@@ -212,7 +201,13 @@ public final class ApplicationContext {
         }
 
         A annotation = pointCut.getAnnotation(annotationClass);
-        WrappedPointCut wrappedPointCut = WrappedPointCut.of(getBean(aspectClass), pointCut, valueGetter.apply(annotation), pointCutType);
+
+        WrappedPointCut wrappedPointCut;
+        try {
+            wrappedPointCut = WrappedPointCut.of(getBean(aspectClass), pointCut, valueGetter.apply(annotation), pointCutType);
+        } catch (Exception e) {
+            throw new IllegalStateException("Got exception on loading pointcut %s".formatted(pointCut), e);
+        }
         pointCuts.add(wrappedPointCut);
     }
 
@@ -221,7 +216,7 @@ public final class ApplicationContext {
     }
 
     public boolean hasBean(@NotNull Class<?> beanClass, @NotNull String id) {
-        return beanClassToInstance.containsKey(Pair.of(beanClass, id));
+        return beanClassToInstance.containsKey(new BeanData(beanClass, id));
     }
 
     @NotNull
@@ -231,13 +226,22 @@ public final class ApplicationContext {
 
     @NotNull
     public <B> B getBean(@NotNull Class<B> beanClass, @NotNull String id) {
-        B bean = (B) beanClassToInstance.get(Pair.of(beanClass, id));
+        B bean = (B) beanClassToInstance.get(new BeanData(beanClass, id));
         if (bean == null) {
             throw new IllegalArgumentException("Bean %s does not exist".formatted(beanClass.getName()));
         }
 
         return bean;
     }
+
+    public <B> void addBean(@NotNull Class<B> beanClass, @NotNull B bean) {
+        addBean(beanClass, "", bean);
+    }
+
+    public <B> void addBean(@NotNull Class<B> beanClass, @NotNull String id, @NotNull B bean) {
+        beanClassToInstance.put(new BeanData(beanClass, id), bean);
+    }
+
 
     @NotNull
     @Unmodifiable
@@ -263,10 +267,5 @@ public final class ApplicationContext {
 
             return cache;
         }).getOrDefault(pointCutType, List.of());
-    }
-
-    @NotNull
-    private static Pair<Class<?>, String> toKeyPair(@NotNull BeanInitializer<?> beanInitializer) {
-        return Pair.of(beanInitializer.getBeanClass(), beanInitializer.getId());
     }
 }

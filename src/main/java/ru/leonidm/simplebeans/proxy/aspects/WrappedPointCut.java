@@ -3,10 +3,14 @@ package ru.leonidm.simplebeans.proxy.aspects;
 import org.intellij.lang.annotations.Language;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
+import ru.leonidm.simplebeans.proxy.aspects.arguments.Args;
+import ru.leonidm.simplebeans.proxy.aspects.arguments.Origin;
+import ru.leonidm.simplebeans.proxy.aspects.arguments.Result;
+import ru.leonidm.simplebeans.proxy.aspects.arguments.This;
 import ru.leonidm.simplebeans.utils.ExceptionUtils;
 
+import java.lang.annotation.Annotation;
 import java.lang.reflect.Method;
-import java.lang.reflect.Parameter;
 import java.util.Arrays;
 import java.util.function.Predicate;
 import java.util.regex.Matcher;
@@ -38,35 +42,54 @@ public final class WrappedPointCut {
                                      @NotNull PointCutType pointCutType) {
         PointCutHandler[] arguments = new PointCutHandler[pointCut.getParameterCount()];
 
-        Parameter[] parameters = pointCut.getParameters();
-        for (int index = 0; index < parameters.length; index++) {
-            Parameter parameter = parameters[index];
-            Class<?> type = parameter.getType();
-            if (type == Class.class) {
-                arguments[index] = (method, args, result) -> method.getDeclaringClass();
-            } else if (type == Method.class) {
-                arguments[index] = (method, args, result) -> method;
-            } else if (type == Object[].class) {
-                arguments[index] = (method, args, result) -> args;
-            } else if (type == Object.class) {
+        Annotation[][] parameterAnnotations = pointCut.getParameterAnnotations();
+        for (int index = 0; index < parameterAnnotations.length; index++) {
+            Annotation[] annotations = parameterAnnotations[index];
+            Annotation annotation = getParameterAnnotation(annotations);
+
+            if (annotation instanceof Args) {
+                arguments[index] = (instance, method, args, result) -> args;
+            } else if (annotation instanceof Origin) {
+                arguments[index] = (instance, method, args, result) -> method;
+            } else if (annotation instanceof Result) {
                 if (pointCutType == PointCutType.BEFORE) {
                     throw new IllegalStateException("@Before point cut %s cannot access the result".formatted(pointCut));
                 }
 
-                arguments[index] = (method, args, result) -> result;
-            } else {
-                throw new IllegalStateException("Got unknown argument %s in point cut %s".formatted(type.getName(), pointCut));
+                arguments[index] = (instance, method, args, result) -> result;
+            } else if (annotation instanceof This) {
+                arguments[index] = (instance, method, args, result) -> instance;
             }
         }
 
-        return new WrappedPointCut((method, args, result) -> {
+        return new WrappedPointCut((instance, method, args, result) -> {
             try {
-                Object[] finalArgs = Arrays.stream(arguments).map(arg -> arg.handle(method, args, result)).toArray();
+                Object[] finalArgs = Arrays.stream(arguments).map(arg -> arg.handle(instance, method, args, result)).toArray();
                 return pointCut.invoke(aspectInstance, finalArgs);
             } catch (Exception e) {
                 throw ExceptionUtils.wrapToRuntime(e);
             }
         }, buildMask(mask), pointCutType, pointCut.getReturnType() == Void.TYPE);
+    }
+
+    @NotNull
+    private static Annotation getParameterAnnotation(@NotNull Annotation @NotNull [] annotations) {
+        Annotation out = null;
+        for (Annotation annotation : annotations) {
+            if (annotation instanceof Args || annotation instanceof Origin || annotation instanceof Result || annotation instanceof This) {
+                if (out != null) {
+                    throw new IllegalArgumentException("Cannot resolve argument with two or more annotations");
+                }
+
+                out = annotation;
+            }
+        }
+
+        if (out == null) {
+            throw new IllegalArgumentException("Cannot resolve argument with zero annotations");
+        }
+
+        return out;
     }
 
     @NotNull
@@ -187,9 +210,9 @@ public final class WrappedPointCut {
     }
 
     @Nullable
-    public Object run(@NotNull Method method, @Nullable Object @Nullable [] args, @Nullable Object result) {
+    public Object run(@NotNull Object instance, @NotNull Method method, @Nullable Object @Nullable [] args, @Nullable Object result) {
         try {
-            return pointCutHandler.handle(method, args, result);
+            return pointCutHandler.handle(instance, method, args, result);
         } catch (Exception e) {
             throw ExceptionUtils.wrapToRuntime(e);
         }
@@ -199,7 +222,7 @@ public final class WrappedPointCut {
     private interface PointCutHandler {
 
         @Nullable
-        Object handle(@NotNull Method method, @Nullable Object @Nullable [] args, @Nullable Object result);
+        Object handle(@NotNull Object instance, @NotNull Method method, @Nullable Object @Nullable [] args, @Nullable Object result);
 
     }
 }

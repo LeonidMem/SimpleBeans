@@ -1,14 +1,19 @@
 package ru.leonidm.simplebeans.beans;
 
 import org.jetbrains.annotations.NotNull;
+import org.jetbrains.annotations.Unmodifiable;
 import ru.leonidm.simplebeans.applications.ApplicationContext;
 import ru.leonidm.simplebeans.proxy.AdvancedProxy;
 import ru.leonidm.simplebeans.utils.ExceptionUtils;
 
+import java.lang.annotation.Annotation;
 import java.lang.reflect.Constructor;
 import java.lang.reflect.Executable;
 import java.lang.reflect.Method;
+import java.lang.reflect.Parameter;
+import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.List;
 
 public sealed abstract class BeanInitializer<E extends Executable> permits BeanInitializer.BeanMethod,
                                                                            BeanInitializer.BeanConstructor {
@@ -40,6 +45,34 @@ public sealed abstract class BeanInitializer<E extends Executable> permits BeanI
 
     public boolean canCreate() {
         return executable.getParameterCount() == 0 || Arrays.stream(executable.getParameterTypes()).allMatch(context::hasBean);
+    }
+
+    @NotNull
+    @Unmodifiable
+    public List<BeanData> getDependencies() {
+        List<BeanData> out = new ArrayList<>();
+
+        Parameter[] parameters = executable.getParameters();
+        Annotation[][] parameterAnnotations = executable.getParameterAnnotations();
+        for (int index = 0; index < parameters.length; index++) {
+            Parameter parameter = parameters[index];
+            Annotation[] annotations = parameterAnnotations[index];
+
+            Bean bean = null;
+            for (Annotation annotation : annotations) {
+                if (annotation instanceof Bean bean1) {
+                    bean = bean1;
+                    break;
+                }
+            }
+
+            String id = bean != null ? bean.id() : "";
+            Class<?> beanClass = parameter.getType();
+
+            out.add(new BeanData(beanClass, id));
+        }
+
+        return List.copyOf(out);
     }
 
     @NotNull
@@ -78,8 +111,12 @@ public sealed abstract class BeanInitializer<E extends Executable> permits BeanI
         }
 
         @Override
-        public boolean canCreate() {
-            return super.canCreate() && context.hasBean(configurationClass);
+        @NotNull
+        @Unmodifiable
+        public List<BeanData> getDependencies() {
+            List<BeanData> classes = new ArrayList<>(super.getDependencies());
+            classes.add(new BeanData(configurationClass, ""));
+            return List.copyOf(classes);
         }
 
         @Override

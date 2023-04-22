@@ -1,6 +1,40 @@
 # SimpleBeans
 Spring-like beans with **proxy** and **simple aspects**.
 
+
+# Importing
+
+* Maven:
+```xml
+<repositories>
+  <repository>
+    <id>smashup-repository</id>
+    <name>SmashUp Repository</name>
+    <url>https://mvn.smashup.ru/releases</url>
+  </repository>
+</repositories>
+
+<dependencies>
+  <dependency>
+    <groupId>ru.leonidm</groupId>
+    <artifactId>SimpleBeans</artifactId>
+    <version>1.0.0</version>
+  </dependency>
+</dependencies>
+```
+
+* Gradle:
+```groovy
+repositories {
+  maven { url 'https://mvn.smashup.ru/releases' }
+}
+
+dependencies {
+  implementation 'ru.leonidm:SimpleBeans:1.0.0'
+}
+```
+
+
 # I. Create application
 To create application, you just need annotate class with `@Application` and call `SimpleApplication.run` method:
 
@@ -72,23 +106,23 @@ All beans and return values of their methods are proxied *(even the objects)*, s
 public class ConnectionAspect {
 
     @Before("java.sql.Connection.execute**")
-    public void aspect(Method method, Object[] args) {
+    public void aspect(@Origin Method method, @Args Object[] args) {
         args[0] = ((String) args[0]).repeat(2);
     }
 
     @After("java.sql.Statement.execute**")
-    public int aspect(Object result) {
+    public int aspect(@This Object instance, @Result Object result) {
         return ((Integer) result) * 4;
     }
 
 }
 ```
 
-In aspect there are several types of arguments can be used:
-* `Method` — method that was called
-* `Class` — non-proxied class
-* `Object` — result *(can be used only in `@After` point cut)*
-* `Object[]` — arguments *(if they are changed in `@Before`)*, then they will be changed before method call
+In aspect there are several types of parameters that can be used:
+* `@Origin Method` — non-proxied method that was called
+* `@Args Object[]` — arguments *(if they are changed in `@Before`)*, then they will be changed before method call
+* `@Result Object` — result *(can be used only in `@After` point cut)*
+* `@Instance Object` — proxied instance
 
 ### More about pointcuts' masks
 Masks are divided in three parts:
@@ -126,7 +160,4 @@ Also, there are some wildcards:
 * `net.foo.bar.get*` — class with name `net.foo.bar`, any method with name `get/any symbols/`, any amount of arguments
 
 # TODO list:
-* Improve aspect arguments resolving
-* Removed need for `java.lang` in pointcuts' masks
-* Add ability to run code in IntelliJ IDEA without compiling
-* Tests
+* Remove need for `java.lang` in pointcuts' masks

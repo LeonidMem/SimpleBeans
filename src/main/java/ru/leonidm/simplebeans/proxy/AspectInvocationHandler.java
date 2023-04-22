@@ -31,11 +31,11 @@ public final class AspectInvocationHandler implements InvocationHandler {
     @Override
     public Object invoke(Object proxy, Method method, Object[] args) throws Throwable {
         for (WrappedPointCut wrappedPointCut : context.getPointCuts(method, PointCutType.BEFORE)) {
-            wrappedPointCut.run(method, args, null);
+            wrappedPointCut.run(proxy, method, args, null);
         }
         Object result = method.invoke(realObject, args);
         for (WrappedPointCut wrappedPointCut : context.getPointCuts(method, PointCutType.AFTER)) {
-            Object pointCutResult = wrappedPointCut.run(method, args, result);
+            Object pointCutResult = wrappedPointCut.run(proxy, method, args, result);
             if (!wrappedPointCut.isVoid()) {
                 result = pointCutResult;
             }
