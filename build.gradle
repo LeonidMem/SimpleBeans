@@ -5,7 +5,7 @@ plugins {
 
 def simpleBeansGroupId = 'ru.leonidm'
 def simpleBeansArtifactId = 'SimpleBeans'
-def simpleBeansVersion = '1.0.0'
+def simpleBeansVersion = '1.0.1'
 
 group simpleBeansGroupId
 version simpleBeansVersion
@@ -27,7 +27,6 @@ dependencies {
 
     implementation 'ru.leonidm:CommonsM:1.0.1'
 
-    implementation 'org.jooq:joor:0.9.14'
     implementation 'org.apache.bcel:bcel:6.7.0'
     implementation 'net.bytebuddy:byte-buddy:1.14.2'
 

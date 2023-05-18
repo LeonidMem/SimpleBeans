@@ -1,4 +1,4 @@
-package ru.leonidm.simplebeans.tests;
+package ru.leonidm.simplebeanstests.normal;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
@@ -20,8 +20,8 @@ import java.lang.reflect.Method;
 @Aspect
 public class ConnectionAspect {
 
-    private static boolean beforeAdviceCalled = false;
-    private static boolean afterAdviceCalled = false;
+    private boolean beforeAdviceCalled = false;
+    private boolean afterAdviceCalled = false;
 
     @Before("**.SomeStatement.execute*")
     public void advice(@Origin Method method, @Args Object [] args) {
@@ -54,11 +54,11 @@ public class ConnectionAspect {
         return ((String) result).toLowerCase();
     }
 
-    public static boolean isBeforeAdviceCalled() {
+    public boolean isBeforeAdviceCalled() {
         return beforeAdviceCalled;
     }
 
-    public static boolean isAfterAdviceCalled() {
+    public boolean isAfterAdviceCalled() {
         return afterAdviceCalled;
     }
 }

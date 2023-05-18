@@ -1,4 +1,4 @@
-package ru.leonidm.simplebeans.tests;
+package ru.leonidm.simplebeanstests.normal;
 
 public class SomeStatement {
 

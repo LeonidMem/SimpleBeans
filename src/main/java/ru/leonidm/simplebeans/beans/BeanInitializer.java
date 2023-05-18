@@ -43,10 +43,6 @@ public sealed abstract class BeanInitializer<E extends Executable> permits BeanI
         return new BeanConstructor(constructor, context);
     }
 
-    public boolean canCreate() {
-        return executable.getParameterCount() == 0 || Arrays.stream(executable.getParameterTypes()).allMatch(context::hasBean);
-    }
-
     @NotNull
     @Unmodifiable
     public List<BeanData> getDependencies() {

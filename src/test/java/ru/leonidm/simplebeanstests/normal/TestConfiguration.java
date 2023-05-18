@@ -1,4 +1,4 @@
-package ru.leonidm.simplebeans.tests;
+package ru.leonidm.simplebeanstests.normal;
 
 import ru.leonidm.simplebeans.beans.Bean;
 import ru.leonidm.simplebeans.beans.Configuration;
@@ -18,7 +18,7 @@ public class TestConfiguration {
         return new FooBean() {
             @Override
             public String toString() {
-                return "ru.leonidm.simplebeans.tests.FooBean@";
+                return "ru.leonidm.simplebeanstests.normal.FooBean@";
             }
         };
     }

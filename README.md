@@ -18,7 +18,7 @@ Spring-like beans with **proxy** and **simple aspects**.
   <dependency>
     <groupId>ru.leonidm</groupId>
     <artifactId>SimpleBeans</artifactId>
-    <version>1.0.0</version>
+    <version>1.0.1</version>
   </dependency>
 </dependencies>
 ```
@@ -30,7 +30,7 @@ repositories {
 }
 
 dependencies {
-  implementation 'ru.leonidm:SimpleBeans:1.0.0'
+  implementation 'ru.leonidm:SimpleBeans:1.0.1'
 }
 ```
 
@@ -158,6 +158,3 @@ Also, there are some wildcards:
 * `net.*.foo.*(java.lang.String)` — any class with name `net./one any package/.foo`, any method, one `String` argument
 * `net.*bar.foo.*(java.lang.String)` — any class with name `net./one any package, but ends with bar/.foo`, any method, one `String` argument
 * `net.foo.bar.get*` — class with name `net.foo.bar`, any method with name `get/any symbols/`, any amount of arguments
-
-# TODO list:
-* Remove need for `java.lang` in pointcuts' masks

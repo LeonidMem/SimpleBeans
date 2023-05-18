@@ -1,4 +1,4 @@
-package ru.leonidm.simplebeans.tests;
+package ru.leonidm.simplebeanstests.normal;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -18,13 +18,13 @@ import java.util.List;
 import java.util.Objects;
 
 @Application
-public class TestApplication {
+public class NormalApplicationTest {
 
     private static ApplicationContext context;
 
     @Test
     public void main() {
-        context = SimpleApplication.run(TestApplication.class);
+        context = SimpleApplication.run(NormalApplicationTest.class);
 
         for (Class<?> clazz : List.of(TestConfiguration.class, TestComponent.class, FooBean.class)) {
             Object bean = context.getBean(clazz);
@@ -44,17 +44,20 @@ public class TestApplication {
         }
 
         String string1 = context.getBean(String.class);
-        assertEquals("string<ru.leonidm.simplebeans.tests.TestComponent>", string1);
+        assertEquals("string<ru.leonidm.simplebeanstests.normal.TestComponent>", string1);
 
         String string2 = context.getBean(String.class, "foo");
-        assertEquals("foo-string<ru.leonidm.simplebeans.tests.FooBean@>", string2);
+        assertEquals("foo-string<ru.leonidm.simplebeanstests.normal.FooBean@>", string2);
 
         SomeStatement someStatement = context.getBean(SomeConnection.class).createStatement();
         assertTrue(someStatement.isSomeParameter());
 
         String result = someStatement.executeUpdate("HELLO, world!");
-        assertTrue(ConnectionAspect.isBeforeAdviceCalled());
-        assertTrue(ConnectionAspect.isAfterAdviceCalled());
+
+        ConnectionAspect connectionAspect = context.getBean(ConnectionAspect.class);
+
+        assertTrue(connectionAspect.isBeforeAdviceCalled());
+        assertTrue(connectionAspect.isAfterAdviceCalled());
         assertEquals("hello, world!hello, world!", result);
 
         String string3 = context.getBean(String.class, "objects");

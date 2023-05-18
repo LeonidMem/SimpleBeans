@@ -11,6 +11,7 @@ import net.bytebuddy.matcher.ElementMatchers;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 import ru.leonidm.simplebeans.applications.ApplicationContext;
+import ru.leonidm.simplebeans.applications.ApplicationProperties;
 import ru.leonidm.simplebeans.logger.LoggerAdapter;
 import ru.leonidm.simplebeans.proxy.aspects.Aspect;
 import ru.leonidm.simplebeans.utils.ExceptionUtils;
@@ -22,6 +23,7 @@ import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 import java.lang.reflect.Modifier;
 import java.lang.reflect.Proxy;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
@@ -30,8 +32,8 @@ import java.util.Set;
 
 public final class AdvancedProxy {
 
-    private static final Map<Class<?>, Class<?>> PROXIED_CLASSES = new HashMap<>();
-    private static final Map<Class<?>, Class<?>> PROXY_CLASS_TO_ORIGINAL = new HashMap<>();
+    private static final Map<Class<?>, Class<?>> PROXIED_CLASSES = Collections.synchronizedMap(new HashMap<>());
+    private static final Map<Class<?>, Class<?>> PROXY_CLASS_TO_ORIGINAL = Collections.synchronizedMap(new HashMap<>());
     private static final Unsafe UNSAFE;
 
     static {
@@ -140,11 +142,12 @@ public final class AdvancedProxy {
 
     @NotNull
     public static <T> T proxyIfNeeded(@NotNull T object, @NotNull Class<?> objectClass, @NotNull ApplicationContext context) {
-        if (isProxyClass(objectClass)) {
-            return object;
+        ApplicationProperties properties = context.getProperties();
+        if (properties.getProperty("simplebeans.aop.enabled", "true").equalsIgnoreCase("true")) {
+            return newProxyInstance(object, objectClass, context);
         }
 
-        return newProxyInstance(object, objectClass, context);
+        return object;
     }
 
     public static boolean isProxyClass(@NotNull Class<?> objectClass) {

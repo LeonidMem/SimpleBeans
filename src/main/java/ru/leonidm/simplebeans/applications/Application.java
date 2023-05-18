@@ -9,4 +9,16 @@ import java.lang.annotation.Target;
 @Retention(RetentionPolicy.RUNTIME)
 public @interface Application {
 
+    String packageName() default "";
+
+    /**
+     * User-defined properties in format "key=value"
+     */
+    String[] properties() default {};
+
+    /**
+     * Listed classes of application, that are must be included in context
+     */
+    Class<?>[] dependencies() default {};
+
 }

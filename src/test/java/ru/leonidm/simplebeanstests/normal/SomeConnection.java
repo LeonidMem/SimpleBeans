@@ -1,4 +1,4 @@
-package ru.leonidm.simplebeans.tests;
+package ru.leonidm.simplebeanstests.normal;
 
 import ru.leonidm.simplebeans.beans.Autowired;
 import ru.leonidm.simplebeans.beans.Component;

@@ -43,13 +43,35 @@ import java.util.stream.Collectors;
 
 public final class ApplicationContext {
 
+    private static final String BASE_PACKAGE_NAME = "ru.leonidm.simplebeans.";
+    private static final Map<Class<?>, ApplicationContext> APPLICATION_CLASS_TO_CONTEXT = new HashMap<>();
+    private final String packageName;
+    private final ApplicationProperties properties;
+    private final BcelClassScanner bcelClassScanner;
     private final Map<BeanData, Object> beanClassToInstance = new HashMap<>();
     private final Set<WrappedPointCut> pointCuts = new HashSet<>();
     private final Map<Method, EnumMap<PointCutType, List<WrappedPointCut>>> pointCutsCache = new HashMap<>();
 
     public ApplicationContext(@NotNull Class<?> applicationClass) {
+        Application application = applicationClass.getAnnotation(Application.class);
+        if (application == null) {
+            throw new IllegalArgumentException("Application class %s does not contains @Application".formatted(applicationClass.getName()));
+        }
+
+        addBean(ApplicationContext.class, this);
+
+        String rawPackageName = application.packageName();
+        if (rawPackageName.isEmpty()) {
+            packageName = applicationClass.getPackageName() + '.';
+        } else {
+            packageName = rawPackageName.endsWith(".") ? rawPackageName : rawPackageName + '.';
+        }
+
+        properties = new ApplicationProperties(applicationClass);
+        APPLICATION_CLASS_TO_CONTEXT.put(applicationClass, this);
+
         Set<File> classPath = GeneralUtils.getClassPathFiles();
-        BcelClassScanner bcelClassScanner = BcelClassScanner.of(classPath, classPath);
+        bcelClassScanner = BcelClassScanner.of(classPath, classPath);
 
         List<Class<?>> beansClasses = new ArrayList<>();
 
@@ -65,8 +87,16 @@ public final class ApplicationContext {
                 return;
             }
 
+            if (!contains(annotationClass)) {
+                return;
+            }
+
             bcelClassScanner.getTypesAnnotatedWith(annotationClass.asSubclass(Annotation.class)).forEach(beanClass -> {
                 if (annotationClass == Component.class && beanClass.isAnnotation()) {
+                    return;
+                }
+
+                if (!contains(beanClass)) {
                     return;
                 }
 
@@ -87,16 +117,18 @@ public final class ApplicationContext {
             });
         });
 
-        bcelClassScanner.getTypesAnnotatedWith(Configuration.class).forEach(configurationClass -> {
-            Arrays.stream(configurationClass.getDeclaredMethods())
-                    .filter(method -> method.isAnnotationPresent(Bean.class))
-                    .filter(method -> method.getReturnType() != Void.TYPE)
-                    .map(method -> {
-                        beansClasses.add(method.getReturnType());
-                        return BeanInitializer.of(method, method.getAnnotation(Bean.class).id(), this);
-                    })
-                    .forEach(dependencyTree::add);
-        });
+        bcelClassScanner.getTypesAnnotatedWith(Configuration.class).stream()
+                .filter(this::contains)
+                .forEach(configurationClass -> {
+                    Arrays.stream(configurationClass.getDeclaredMethods())
+                            .filter(method -> method.isAnnotationPresent(Bean.class))
+                            .filter(method -> method.getReturnType() != Void.TYPE)
+                            .map(method -> {
+                                beansClasses.add(method.getReturnType());
+                                return BeanInitializer.of(method, method.getAnnotation(Bean.class).id(), this);
+                            })
+                            .forEach(dependencyTree::add);
+                });
 
         dependencyTree.initializeBeans();
 
@@ -156,17 +188,33 @@ public final class ApplicationContext {
                     }
                 });
 
-        bcelClassScanner.getMethodsAnnotatedWith(Before.class).forEach(pointCut -> {
-            if (pointCut.getReturnType() != Void.TYPE) {
-                throw new IllegalStateException("@Before point cut %s must return void".formatted(pointCut));
-            }
+        // TODO: move this logic into proxy package
+        beansClasses.stream()
+                .filter(beanClass -> beanClass.isAnnotationPresent(Aspect.class))
+                .map(Class::getDeclaredMethods)
+                .flatMap(Arrays::stream)
+                .forEach(advice -> {
+                    if (advice.isAnnotationPresent(Before.class)) {
+                        if (advice.getReturnType() != Void.TYPE) {
+                            throw new IllegalStateException("@Before point cut %s must return void".formatted(advice));
+                        }
 
-            registerPointCut(pointCut, Before.class, Before::value, PointCutType.BEFORE);
-        });
+                        registerAspectAdvice(advice, Before.class, Before::value, PointCutType.BEFORE);
+                    }
 
-        bcelClassScanner.getMethodsAnnotatedWith(After.class).forEach(pointCut -> {
-            registerPointCut(pointCut, After.class, After::value, PointCutType.AFTER);
-        });
+                    if (advice.isAnnotationPresent(After.class)) {
+                        registerAspectAdvice(advice, After.class, After::value, PointCutType.AFTER);
+                    }
+                });
+    }
+
+    @NotNull
+    public static ApplicationContext fromApplicationClass(@NotNull Class<?> applicationClass) {
+        return APPLICATION_CLASS_TO_CONTEXT.get(applicationClass);
+    }
+
+    private boolean contains(@NotNull Class<?> clazz) {
+        return clazz.getName().startsWith(packageName) || clazz.getName().startsWith(BASE_PACKAGE_NAME);
     }
 
     @NotNull
@@ -188,13 +236,23 @@ public final class ApplicationContext {
     }
 
     @NotNull
+    public BcelClassScanner getClassScanner() {
+        return bcelClassScanner;
+    }
+
+    @NotNull
+    public ApplicationProperties getProperties() {
+        return properties;
+    }
+
+    @NotNull
     @UnmodifiableView
     public Collection<Object> getBeans() {
         return Collections.unmodifiableCollection(beanClassToInstance.values());
     }
 
-    private <A extends Annotation> void registerPointCut(@NotNull Method pointCut, @NotNull Class<A> annotationClass,
-                                                         @NotNull Function<A, String> valueGetter, @NotNull PointCutType pointCutType) {
+    private <A extends Annotation> void registerAspectAdvice(@NotNull Method pointCut, @NotNull Class<A> annotationClass,
+                                                             @NotNull Function<A, String> valueGetter, @NotNull PointCutType pointCutType) {
         Class<?> aspectClass = pointCut.getDeclaringClass();
         if (!aspectClass.isAnnotationPresent(Aspect.class)) {
             throw new IllegalStateException("@%s point cut %s is used not in @Aspect class".formatted(annotationClass.getSimpleName(), pointCut));

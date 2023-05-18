@@ -21,8 +21,12 @@ public final class SimpleBeans {
         Set<Class<?>> classes = bcelClassScanner.getTypesAnnotatedWith(Application.class);
 
         for (Class<?> mainClass : classes) {
-            Method method = mainClass.getMethod("main", String[].class);
-            method.invoke(null, (Object) args);
+            try {
+                Method method = mainClass.getMethod("main", String[].class);
+                method.invoke(null, (Object) args);
+            } catch (Exception e) {
+                throw new IllegalStateException("Cannot start application %s".formatted(mainClass.getName()), e);
+            }
         }
     }
 }
